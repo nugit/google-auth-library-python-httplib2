@@ -176,22 +176,12 @@ class AuthorizedHttp(object):
                 **kwargs):
         """Implementation of httplib2's Http.request."""
 
-        _credential_refresh_attempt = kwargs.pop(
-            '_credential_refresh_attempt', 0)
-
         # Make a copy of the headers. They will be modified by the credentials
         # and we want to pass the original headers if we recurse.
         request_headers = headers.copy() if headers is not None else {}
 
         self.credentials.before_request(
             self._request, method, uri, request_headers)
-
-        # Check if the body is a file-like stream, and if so, save the body
-        # stream position so that it can be restored in case of refresh.
-        body_stream_position = None
-        if all(getattr(body, stream_prop, None) for stream_prop in
-               _STREAM_PROPERTIES):
-            body_stream_position = body.tell()
 
         # Make the request.
         response, content = self.http.request(
@@ -202,25 +192,9 @@ class AuthorizedHttp(object):
         # request.
         # A stored token may expire between the time it is retrieved and
         # the time the request is made, so we may need to try twice.
-        if (response.status in self._refresh_status_codes
-                and _credential_refresh_attempt < self._max_refresh_attempts):
-
-            _LOGGER.info(
-                'Refreshing credentials due to a %s response. Attempt %s/%s.',
-                response.status, _credential_refresh_attempt + 1,
-                self._max_refresh_attempts)
-
-            self.credentials.refresh(self._request)
-
-            # Restore the body's stream position if needed.
-            if body_stream_position is not None:
-                body.seek(body_stream_position)
-
-            # Recurse. Pass in the original headers, not our modified set.
-            return self.request(
-                uri, method, body=body, headers=headers,
-                _credential_refresh_attempt=_credential_refresh_attempt + 1,
-                **kwargs)
+        if (response.status in self._refresh_status_codes):
+            # raise error instead of refreshing
+            raise RuntimeError('credentials expired')
 
         return response, content
 
